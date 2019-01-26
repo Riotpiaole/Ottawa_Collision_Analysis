@@ -5,5 +5,5 @@ curl -O http://data.ottawa.ca/dataset/43383343-8071-4dd7-9090-410c2b78af43/resou
 # 2016
 curl -O http://data.ottawa.ca/dataset/adae2dd7-43a1-4e3f-b597-44f7dd10f6a2/resource/a70c564d-1c8a-4ede-be04-bc286434b113/download/2016collisionsfinal.xls
 # 2017
-curl -O http://data.ottawa.ca/dataset/adae2dd7-43a1-4e3f-b597-44f7dd10f6a2/resource/a70c564d-1c8a-4ede-be04-bc286434b113/download/2016collisionsfinal.xls
+curl -O http://data.ottawa.ca/dataset/adae2dd7-43a1-4e3f-b597-44f7dd10f6a2/resource/a70c564d-1c8a-4ede-be04-bc286434b113/download/2017collisionsfinal.xls
 
