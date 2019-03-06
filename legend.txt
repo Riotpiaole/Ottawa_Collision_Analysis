@@ -1,0 +1,64 @@
+environment
+00 - Unknown
+01 - Clear
+02 - Rain
+03 - Snow
+04 - Freezing Rain
+05 - Drifting Snow
+06 - Strong wind
+07 - Fog, mist, smoke, dust
+
+road_surface
+00 - Unknown
+01 - Dry
+02 - Wet
+03 - Loose snow
+04 - Slush
+05 - Packed snow
+06 - Ice
+07 - Mud
+08 - Loose sand or gravel
+09 - Spilled liquid
+99 - Other
+
+traffic_control
+01 - Traffic signal
+02 - Stop sign
+03 - Yield sign
+07 - School bus
+08 - Traffic gate
+09 - Traffic controller
+10 - No control
+11 - Roundabout
+
+collision_location
+01 - Non intersection
+02 - Intersection related
+03 - At intersection
+04 - At/near private drive
+05 - At railway crossing
+06 - Underpass or tunnel
+07 - Overpass or bridge
+
+light
+00 - Unknown
+01 - Daylight
+03 - Dawn
+05 - Dusk
+07 - Dark
+
+collision_classification
+01 - Fatal injury
+02 - Non-fatal injury
+03 - P.D. only
+
+impact_type
+01 - Approaching
+02 - Angle
+03 - Rear end
+04 - Sideswipe
+05 - Turning movement
+06 - SMV unattended vehicle
+07 - SMV other
+99 - Other
+
