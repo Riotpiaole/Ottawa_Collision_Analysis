@@ -2,3 +2,4 @@
 *.csv
 .DS_Store
 datasets
+__pycache__
