@@ -16,8 +16,6 @@ from shrink import combine_ontario
 # multi-process mapper
 # Global variables
 
-pool = Pool(processes=cpu_count())
-
 
 def collision_dir(city):
     return os.path.join('./datasets/collisions/', city)
@@ -29,49 +27,69 @@ station = pd.read_csv(
     'Station-Inventory-EN.csv',
     skiprows=3)
 
-station = station[station['Province'].isin(['ALBERTA', 'ONTARIO'])]
-station_final = station[station.Name.str.contains('OTTAWA|TORONTO|calgary')]
-
-station_ontario = station[station.Name.str.contains('OTTAWA|TORONTO')]
-
-station_ottawa = station[station.Name.str.contains('OTTAWA')]
-station_calgary = station[station.Name.str.contains('calgary')]
-station_toronto = station[station.Name.str.contains('TORONTO')]
-
-ottawa_station_lookup = pd.Index(station_ottawa.Name)
-toronto_station_lookup = pd.Index(station_ottawa.Name)
-calgary_station_lookup = pd.Index(station_ottawa.Name)
-
-
 ottawa_weather, toronto_weather = combine_ontario()
 
 
-def round_minutes(dt, resoultion):
-    new_minute = (dt.minute // resolution + 1)
+station = station[station['Province'].isin(['ALBERTA', 'ONTARIO'])]
+station_final = station[station.Name.str.contains('OTTAWA|TORONTO|calgary')]
+
+station_ottawa = station_final[station_final.Name.str.contains('OTTAWA')]
+
+station_calgary = station_final[station_final.Name.str.contains('calgary')]
+station_toronto = station_final[station_final.Name.str.contains('TORONTO')]
+
+station_ottawa = station_ottawa[
+    station_ottawa.Name.isin(ottawa_weather.Name.unique())]
+
+# generate station long and lat to ottawa_weather
+ottawa_weather['Latitude'] = ottawa_weather.Name.apply(
+    lambda name: station_ottawa[station_ottawa.Name == name].Latitude.values[0] / 10000000)
+ottawa_weather['Longitude'] = ottawa_weather.Name.apply(
+    lambda name: station_ottawa[station_ottawa.Name == name].Longitude.values[0] / 10000000)
+
+# add dummy data to ensure ottawa weather
+ottawa_weather = ottawa_weather.append(
+    ['Unknown'],
+    verify_integrity=True,
+    ignore_index=True)
+
+station_toronto = station_toronto[
+    station_toronto.Name.isin(toronto_weather.Name.unique())]
+
+# generate station long and lat to toronto_weather
+toronto_weather['Latitude'] = toronto_weather.Name.apply(
+    lambda name: station_toronto[station_toronto.Name == name].Latitude.values[0] / 10000000)
+toronto_weather['Longitude'] = toronto_weather.Name.apply(
+    lambda name: station_toronto[station_toronto.Name == name].Longitude.values[0] / 10000000)
+
+ottawa_station_lookup = pd.Index(station_ottawa.Name)
+toronto_station_lookup = pd.Index(station_toronto.Name)
+calgary_station_lookup = pd.Index(station_calgary.Name)
+
+
+# obtain all of the holidays
+Canadian_Holidays = holidays.Canada()
 
 
 def read_data()->'tuple(pd.DataFrame)|3':
     '''Obtain all of the citys data'''
     ottawa, calgary, toronto = None, None, None
     print("Retrieveing data from collision datasets")
-    if os.path.isfile('./datasets/result/ottawa.csv'):
-        ottawa = pd.read_csv('./datasets/result/ottawa.csv')
+    if os.path.isfile('./datasets/tmp/ottawa.csv'):
+        ottawa = pd.read_csv('./datasets/tmp/ottawa.csv')
     else:
         # obtain ottawa
         ottawa_files = os.listdir(collision_dir('Ottawa'))
-        ottawa_file_names = map(
+        ottawa_file_names = list(map(
             lambda x: join_path(collision_dir('Ottawa'), x),
-            list(filter(regex.match, ottawa_files)))
+            filter(regex.match, ottawa_files)))
 
-        df_list = pool.map(pd.read_excel, ottawa_file_names)
-
-        if 'Year' in df_list[-1].columns.values:
-            df_list[-1].drop('Year', axis=1, inplace=True)
-            df_list[-1].to_excel(df_list[-1])
-
+        df_list = [
+            pd.read_csv(fn, encoding="ISO-8859-1") for fn in ottawa_file_names]
+        df_list[-1].drop(columns=['Year'], inplace=True)
         ottawa = pd.concat(df_list, sort=True, ignore_index=True)
         ottawa.dropna(inplace=True)
-        pool.close()
+        ottawa.to_csv('./datasets/tmp/ottawa.csv', index=False)
 
     # obtain calgary
     calgary_files = os.listdir(collision_dir('calgary'))
@@ -90,19 +108,12 @@ def read_data()->'tuple(pd.DataFrame)|3':
 # selecting only Province in ALBERTA and ONTARIO
 
 
-regex = re.compile(r'\w+\.?(xls|xlsx)')
-
-
-def test_lat_lon_dist(dist: 'func'):
-    pt1 = (38.897147, -77.043934)
-    pt2 = (38.898556, -77.037852)
-    result = 0.613  # km
-    assert(result == round(dist(pt1, pt2), 3))
+regex = re.compile(r'\w+\.csv')
 
 
 @np.vectorize
 def degree2rad(x):
-    return x * pi / 180
+    return float(x) * pi / 180.
 
 
 def compute_distance(
@@ -129,39 +140,50 @@ def vectorizes_compute_dist(
     '''compute the distance with relevant city '''
     stations = None
     assert(city.lower() in ['ottawa', 'toronto', 'calgary'])
+
     if city.lower() == 'ottawa':
         stations = station_ottawa
+
     elif city.lower() == 'toronto':
         stations = station_toronto
+
     else:
         stations = station_calgary
+
     stations_values = degree2rad(
         stations[
             ['Latitude',
              'Longitude']] / 10000000)
+
     return np.apply_along_axis(
         compute_distance, -1, table, stations_values, stations, top)
 
-
 def suggregate_weather_station(
         row: 'clloision_row',
-        lookup: 'pd.DataFrame')-> 'pd.DataFrame':
+        lookup: 'pd.DataFrame',
+        weather_table: 'pd.DataFrame')-> 'pd.DataFrame':
     '''generating weather dimension suggregate key'''
+    key = 0
     rt, rn = row
-    return lookup.get_loc((str(rt)[:-3], rn))
+    try:
+        key = lookup.get_loc((str(rt)[:-3], rn))
+    except KeyError:
+        key = lookup.shape[0] - 1
+    return key
 
 
 def vectorize_weather_station(
         table: 'clloision_table',
         weather_table: 'ndarray')-> 'pd.DataFrame':
     '''merge weather station table vectorizly'''
+    weather_table
     lookup = pd.Index(weather_table[['DateTime', 'Name']])
-
+    # check_for_exists
     return np.apply_along_axis(
         suggregate_weather_station,
-        -1, table[['Datetime', '1_closest']],
-        lookup)
-
+        -1, table[['DateTime', '1_closest']],
+        lookup,
+        weather_table)
 
 def locaton_row(func: 'function'):
     def location_and_call(*args, **kwargs):
@@ -200,50 +222,60 @@ def location_preprocess(location_cols):
             return x
     return np.vstack(location_cols.apply(mapper_function).values)
 
-def ottawa_dimensions(ottawa):
-    if os.path.isfile('./datasets/result/ottawa.csv'):
-        ottawa = pd.read_csv('./datasets/result/ottawa.csv')[
-            ['hour_key',
-                'location_key',
-                'Accident_key',
-                'weather_key',
-                'Is_Fatal',
-                'Is_Intersection']]
-        ottawa.to_csv('./datasets/result/ottawa_star_schema.csv', index=False)
-        return ottawa
 
+def toronto_preprocess(st1, st2):
+    if st2 == 'Unknown':
+        return [st1, 'Unknown', 'Unknown']
+    else:
+        return [st1, st2, 'Unkown']
+
+
+def ottawa_dimensions(ottawa):
+    if os.path.isfile('./datasets/tmp/ottawa_star_schema.csv'):
+        ottawa = pd.read_csv('./datasets/tmp/ottawa.csv', low_memory=False)[
+            ['hour_key',
+             'location_key',
+             'Accident_key',
+             'weather_key',
+             'Is_Fatal',
+             'Is_Intersection']]
+        ottawa.to_csv('./datasets/tmp/ottawa_star_schema.csv', index=False)
+        return ottawa
+    ottawa.dropna(inplace=True)
     # generate is fatal columns
     ottawa['Is_Fatal'] = ottawa.Collision_Classification.apply(
         lambda collision_class: 1 if collision_class == '01 - Fatal injury' else 0)
+
     ottawa['Is_Intersection'] = ottawa.Location.apply(
         lambda location: 1 if '@' in location else 0)
 
-
     # handling time after 12 am would parse it as string
-    ottawa.Time = ottawa.Time.apply(
-        lambda x: x if isinstance(
-            x, time) else datetime.strptime(
-            x, '%H:%M:%S').time())
-
+    ottawa['DateTime'] = ottawa.Date.combine(
+        ottawa.Time, lambda date, time:
+            datetime.strptime(date + ' ' + time, '%Y-%m-%d %I:%M:%S %p')
+        if len(time) > 5 else
+            datetime.strptime(date + ' ' + time, '%Y-%m-%d %H:%M'))
+    ottawa['Accident_time'] = ottawa.DateTime.apply(
+        lambda datetime: datetime.time())
+    ottawa['Date'] = ottawa.DateTime.apply(
+        lambda datetime: datetime.date())
     # combining date and time
-    ottawa['Datetime'] = ottawa.Date.combine(
-        ottawa.Time, lambda x, y: datetime.combine(x, y))
 
     # rounding up 1 hour time region upper bound
-    ottawa['Datetime'] = ottawa.Datetime.apply(
-        lambda x: pd.Timestamp(x)).dt.round('H')
 
     ottawa['year'] = ottawa['Date'].apply(lambda x: x.year)
     ottawa['month'] = ottawa['Date'].apply(lambda x: x.month)
     ottawa['day'] = ottawa['Date'].apply(lambda x: x.day)
-    ottawa['hour'] = ottawa['Time'].apply(lambda x: x.hour)
+    ottawa['hour'] = ottawa['Accident_time'].apply(lambda x: x.hour)
 
     # ===================================================
     # Hour dimension
     # ===================================================
-    if os.path.isfile('./datasets/result/hour_dimension.csv'):
+    if os.path.isfile('./datasets/tmp/hour_dimension.csv'):
         print("hour_dimension file found")
-        hour_dimension = pd.read_csv('./datasets/result/hour_dimension.csv')
+        hour_dimension = pd.read_csv(
+            './datasets/tmp/hour_dimension.csv',
+            low_memory=False)
     else:
         print("Ottawa datasets preprocessing")
         print("Staging hour_dimension")
@@ -264,13 +296,14 @@ def ottawa_dimensions(ottawa):
         hour_dimension = ottawa.groupby(
             ['year', 'month', 'day', 'hour',
              'Date', 'day_of_the_week', 'weekend',
-             'holiday', 'holiday_name'])\
+             'holiday', 'holiday_name'], as_index=False)\
             .size().reset_index()
 
         hour_dimension.drop(columns=hour_dimension.columns[-1], inplace=True)
+        hour_dimension.drop_duplicates(inplace=True)
         hour_dimension.to_csv(
-            './datasets/result/hour_dimension.csv')
-
+            './datasets/tmp/hour_dimension.csv')
+        ottawa.to_csv('./datasets/tmp/ottawa.csv',index=False)
     # ===================================================
     #  Accident Dimension
     # ===================================================
@@ -293,17 +326,20 @@ def ottawa_dimensions(ottawa):
     # group by combination of unique cases
     accident_dimension = ottawa.groupby(key).size().reset_index()
     accident_dimension = accident_dimension.rename(index=str, columns=kv_dict)
+    accident_dimension.drop(
+        columns=accident_dimension.columns[-1], inplace=True)
+    accident_dimension.drop_duplicates(inplace=True)
+    accident_dimension.to_csv('./datasets/tmp/accident_dimension.csv')
+    ottawa.to_csv('./datasets/tmp/ottawa.csv',index=False)
 
     # ===================================================
     #  Weather Dimension
     # ===================================================
-
     weather_dimension = None
-    if os.path.isfile('./datasets/result/weather_dimension.csv'):
+    if os.path.isfile('./datasets/tmp/weather_dimension.csv'):
         print("Weather Dimension found loading the file")
         weather_dimension = pd.read_csv(
-            './datasets/result/weather_dimension.csv')
-
+            './datasets/tmp/weather_dimension.csv', low_memory=False)
     else:
         print("Preprocessing weather dimension")
         # generating compute the distance against all of the ottawa stations
@@ -311,46 +347,28 @@ def ottawa_dimensions(ottawa):
             degree2rad(ottawa[['Latitude', 'Longitude']].values),
             'ottawa', 3)
         # find the top three closest stations
-
         ottawa['1_closest'] = closest_weather_stations[:, 0]
 
-        # remove the ottawa_weather that is exists in ottawa
-        ottawa_weathers = ottawa_weather[
-            ottawa_weather.DateTime.isin(
-                ottawa['Datetime'].apply(lambda x: str(x)[:-3]).values)
-        ].reset_index(drop=True)
-
-        weather_dimension = ottawa_weathers[
-            ottawa_weathers.Name.isin(
-                ottawa['1_closest'].unique())
-        ].reset_index(drop=True)
+        # weather_dimension
 
         ottawa['weather_key'] = vectorize_weather_station(
-            ottawa, weather_dimension)
+            ottawa, ottawa_weather)
 
-        weather_dimension = weather_dimension[weather_dimension.index.isin(
+        weather_dimension = ottawa_weather[ottawa_weather.index.isin(
             ottawa['weather_key'].unique())]
 
         # inverting index for remove un-needed
         weather_dimension['Inverted_index'] = weather_dimension.index
         weather_dimension.reset_index(inplace=True, drop=True)
 
-        weather_dimension['Latitude'] = weather_dimension.Name.apply(
-            lambda x: station_ottawa.iloc[
-                ottawa_station_lookup.get_loc(x)]
-            ['Latitude']) / 10000000
-
-        weather_dimension['Longitude'] = weather_dimension.Name.apply(
-            lambda x: station_ottawa.iloc[
-                ottawa_station_lookup.get_loc(x)]
-            ['Longitude']) / 10000000
-
         weather_index_lookup = pd.Index(weather_dimension['Inverted_index'])
         ottawa['weather_key'] = ottawa['weather_key'].apply(
             lambda x: weather_index_lookup.get_loc(x))
+        weather_dimension.drop_duplicates(inplace=True)
 
         weather_dimension.to_csv(
-            './datasets/result/weather_dimension.csv')
+            './datasets/tmp/weather_dimension.csv')
+        ottawa.to_csv('./datasets/tmp/ottawa.csv', index=False)
 
     # ===================================================
     # Location
@@ -360,19 +378,8 @@ def ottawa_dimensions(ottawa):
     ottawa['Intersection-1'] = location_indexing[:, 1]
     ottawa['Intersection-2'] = location_indexing[:, 2]
 
-    all_csv = filter(re.compile(r'\w+\.csv').match, os.listdir('.'))
-    neighbourhoods = [pd.read_csv(i, engine='python') for i in all_csv]
-    neighbourhoods = pd.concat(neighbourhoods, sort=True, ignore_index=True)
 
-    # replacing unicode error
-    neighbourhoods.replace(np.nan, 'unknown', inplace=True)
-    neighbourhoods.Neighborhood = neighbourhoods.Neighborhood.combine(
-        neighbourhoods.Record,
-        lambda neighbour, record:
-            record if neighbour == 'unknown' else neighbour)
-
-    #TODO jackline lat long issues
-    ottawa['Neighborhood'] = neighbourhoods.Neighborhood[:-45]
+    neighbourhoods = ottawa.Neighborhood
 
     location_dimension = ottawa.groupby(
         ['Street-Name', 'Intersection-1', 'Intersection-2',
@@ -380,27 +387,15 @@ def ottawa_dimensions(ottawa):
 
     location_dimension.drop(
         columns=location_dimension.columns[-1], inplace=True)
-
+    location_dimension.drop_duplicates(inplace=True)
     location_index = pd.Index(location_dimension)
     ottawa['location_key'] = [location_index.get_loc(
         tuple(i)) for i in ottawa[location_dimension.columns].values]
+    location_dimension['City'] = [
+        'OTTAWA' for i in range(
+            location_dimension.shape[0])]
 
-    location_dimension.to_csv('./datasets/result/location_dimension.csv')
-
-    # ===================================================
-    #TODO Event
-    # ===================================================
-
-    # event_data = pd.read_csv('./events_annual_Ottawa_14-17.csv')
-    # event_data.drop(columns=['Event-key'], inplace=True)
-
-    # def convert_str_date(date): return datetime.strptime(date, '%Y-%m-%d')
-
-    # event_data['Event-start-date'] = event_data['Event-start-date'].apply(
-    #     convert_str_date)
-    # event_data['Event-end-date'] = event_data['Event-end-date'].apply(
-    #     convert_str_date)
-
+    location_dimension.to_csv('./datasets/tmp/location_dimension.csv')
     # ===================================================
     # Grouping suggorgate key
     # ===================================================
@@ -414,15 +409,18 @@ def ottawa_dimensions(ottawa):
             ac_index.get_loc(tuple(row)))
 
     ottawa['Accident_key'] = np.array(ottawa_accident_value)
+    index = pd.Index(hour_dimension[['hour', 'Date']])
 
-    hour_index = pd.Index(hour_dimension[['hour', 'Date']])
+    def hour_parser(hr, date):
+        result = hour_dimension[
+            (hour_dimension['Date'] == date) &
+            (hour_dimension['hour'] == hr)]
+        return result.index.values[0]
+
     ottawa['hour_key'] = ottawa.hour.combine(
         ottawa.Date,
-        lambda hour, date:
-            hour_index.get_loc((hour, str(date)[:-9])))
-
-
-
+        hour_parser)
+    ottawa.to_csv('./datasets/tmp/ottawa.csv',index=False)
     return ottawa
 
 
@@ -437,8 +435,8 @@ def calgary_dimension(calgary):
     # ImpactType :-> IMPACTTYPE
     # Neighbour :-> Comm
 
-    if os.path.isfile('./datasets/result/calgary.csv'):
-        return pd.read_csv('./datasets/result/calgary.csv')
+    if os.path.isfile('./datasets/tmp/calgary.csv'):
+        return pd.read_csv('./datasets/tmp/calgary.csv')
 
     key = [
         'DATE',
@@ -468,46 +466,47 @@ def calgary_dimension(calgary):
 
     return calgary
 
+
 def toronto_dimension(toronto):
 
     toronto = toronto[toronto.YEAR.isin([2014, 2015, 2016, 2017])]
     all_impact_types = {
-        'SMV Other':'07 - SMV other',
-        'Angle':'02 - Angle',
-        'Turning Movement':'05 - Turning movement',
-        'SMV Unattended Vehicle':'06 - SMV unattended vehicle',
-        'Cyclist Collisions':'99 - Other',
-        'Pedestrian Collisions':'99 - Other',
-        'Other':'99 - Other',
-        'Sideswipe':'04 - Sideswipe',
-        'Approaching':'01 - Approaching',
-        'Rear End':'03 - Rear end'}
+        'SMV Other': '07 - SMV other',
+        'Angle': '02 - Angle',
+        'Turning Movement': '05 - Turning movement',
+        'SMV Unattended Vehicle': '06 - SMV unattended vehicle',
+        'Cyclist Collisions': '99 - Other',
+        'Pedestrian Collisions': '99 - Other',
+        'Other': '99 - Other',
+        'Sideswipe': '04 - Sideswipe',
+        'Approaching': '01 - Approaching',
+        'Rear End': '03 - Rear end'}
 
-    all_environment_type ={
-        'Rain':'02 - Rain',
-        'Clear':'01 - Clear',
-        'Snow':'03 - Snow',
-        ' ':'99 - Other',
-        'Other':'99 - Other',
-        'Freezing Rain':'04 - Freezing Rain',
-        'Fog, Mist, Smoke, Dust':'07 - Fog, mist, smoke, dust',
+    all_environment_type = {
+        'Rain': '02 - Rain',
+        'Clear': '01 - Clear',
+        'Snow': '03 - Snow',
+        ' ': '99 - Other',
+        'Other': '99 - Other',
+        'Freezing Rain': '04 - Freezing Rain',
+        'Fog, Mist, Smoke, Dust': '07 - Fog, mist, smoke, dust',
     }
 
     all_traffic_type = {
-        'Traffic Signal':'01 - Traffic signal',
-        'No Control':'10 - No control',
-        'Stop Sign':'02 - Stop sign',
-        'Pedestrian Crossover':'04 - Ped. crossover'
+        'Traffic Signal': '01 - Traffic signal',
+        'No Control': '10 - No control',
+        'Stop Sign': '02 - Stop sign',
+        'Pedestrian Crossover': '04 - Ped. crossover'
     }
 
     all_road_surface_type = {
-        'Dry':'01 - Dry',
-        'Wet':'02 - Wet',
-        'Other':'99 - Other',
-        'Loose Snow':'03 - Loose snow',
-        'Slush':'04 - Slush',
-        ' ':'99 - Other',
-        'Ice':'06 - Ice'
+        'Dry': '01 - Dry',
+        'Wet': '02 - Wet',
+        'Other': '99 - Other',
+        'Loose Snow': '03 - Loose snow',
+        'Slush': '04 - Slush',
+        ' ': '99 - Other',
+        'Ice': '06 - Ice'
     }
 
     toronto.drop(
@@ -555,7 +554,7 @@ def toronto_dimension(toronto):
 
     def parse_time_string(x):
         int_4_str = (4 - len(str(x))) * '0' + str(x)
-        return int_4_str[:2]+ ':' + int_4_str[2:] + ':00'
+        return int_4_str[:2] + ':' + int_4_str[2:] + ':00'
 
     toronto['Impact_type'] = toronto['IMPACTYPE'].apply(
         lambda x: all_impact_types[x])
@@ -574,47 +573,228 @@ def toronto_dimension(toronto):
 
     extra_dimension = []
 
-    if os.path.isfile('./datasets/result/accident_dimension.csv'):
-        accident_dimension = pd.read_csv('./datasets/result/accident_dimension.csv')
+    if os.path.isfile('./datasets/tmp/accident_dimension.csv'):
+        accident_dimension = pd.read_csv(
+            './datasets/tmp/accident_dimension.csv',
+            low_memory=False)
+        accident_dimension.drop(
+            columns=accident_dimension.columns[0],
+            inplace=True)
         toronto_accident = toronto.groupby(
             ['Accident-time',
+             'Environment',
+             'Road_Surface',
+             'Traffic_Control',
+             'Impact_type']).size().reset_index()
+
+        retrieval_cols = [
+            'Accident-time',
             'Environment',
             'Road_Surface',
             'Traffic_Control',
-            'Impact_type']).size().reset_index()
-
-        retrieval_cols = ['Accident-time','Environment','Road_Surface','Traffic_Control','Impact_type']
+            'Impact_type']
         toronto_index = pd.Index(accident_dimension[retrieval_cols]).values
+
         def check_exists(row):
             if tuple(row) not in toronto_index:
                 extra_dimension.append(row)
-        apple = [ check_exists(x) for x in toronto_accident[retrieval_cols].values]
+        apple = [check_exists(x)
+                 for x in toronto_accident[retrieval_cols].values]
 
-        toronto_accident.drop(columns=toronto_accident.columns[-1],inplace=True)
+        toronto_accident.drop(
+            columns=toronto_accident.columns[-1], inplace=True)
+        accident_dimension = pd.concat(
+            [accident_dimension, toronto_accident], ignore_index=True)
+        accident_dimension.drop_duplicates(inplace=True)
+        toronto['Accident_key'] = [
+            accident_dimension[
+                np.all(
+                    (value == accident_dimension[:]).values, 1)].index[0]
+            for value in toronto[accident_dimension.columns].values]
+        accident_dimension.to_csv('./datasets/tmp/accident_dimension.csv')
+    else:
+        raise FileNotFoundError("Preprocessed Ottaw dimension first")
 
+    # =================================================
+    # weather_dimension
+    # =================================================
 
-    # toronto['closest_station'] = vectorize_weather_station(
-    #     degree2rad(toronto[['LATITUDE','LONGITUDE']].values),
-    #     'toronto')[:,0]
+    toronto['1_closest'] = vectorizes_compute_dist(
+        degree2rad(toronto[['LATITUDE', 'LONGITUDE']].values),
+        'toronto', 1)[:, 0]
+    toronto['DateTime'] = toronto.DATE.combine(
+        toronto['Accident-time'],
+        lambda date, time:
+            date[:10] + ' ' + time[:5])
+    cond = True
+    if os.path.isfile('./datasets/tmp/weather_dimension.csv'):
+        weather_dimension = pd.read_csv(
+            './datasets/tmp/weather_dimension.csv',)
+        toronto_weathers = toronto_weather[toronto_weather.DateTime.isin(
+            toronto.DateTime.unique())]
+        toronto_weathers['City'] = [
+            'Toronto' for i in range(
+                toronto_weathers.shape[0])]
+        try:
+            weather_dimension.drop(
+                columns=[
+                    'Unnamed: 0',
+                    '0',
+                    'Inverted_index'],
+                inplace=True)
+        except KeyError:
+            cond = False
+        if cond:
+            weather_dimension = pd.concat([
+                weather_dimension,
+                toronto_weathers[weather_dimension.columns]], ignore_index=True)
 
-    # toronto['is_fatal'] = [1 for i in range(toronto.shape[0])]
-    return toronto , toronto_accident, extra_dimension
+            weather_dimension.drop_duplicates(inplace=True)
+            weather_dimension.fillna('Unknown', inplace=True)
+            weather_dimension.to_csv('./datasets/tmp/weather_dimension.csv')
+    else:
+        raise FileNotFoundError('Missing preprocessed dimensions')
+
+    def parse_weather_key(datetime, station_name):
+        result = weather_dimension[
+            (weather_dimension['DateTime'] == datetime) &
+            (weather_dimension['Name'] == station_name)
+        ]
+        if result.shape[0] == 0:
+            return 636
+        else:
+            return result.index
+
+    toronto['weather_key'] = toronto.DateTime.combine(
+        toronto['1_closest'],
+        parse_weather_key)
+
+    toronto['Is_Fatal'] = [1 for i in range(toronto.shape[0])]
+
+    # =================================================
+    # location_dimension
+    # =================================================
+
+    toronto.STREET2.replace(' ', 'Unknown', inplace=True)
+    toronto['Is_Intersection'] = toronto.STREET2.apply(
+        lambda street2:
+            1 if street2 != 'Unknown' else 0)
+
+    location_result = np.vstack(toronto.STREET1.combine(
+        toronto.STREET2,
+        lambda st1, st2:
+            toronto_preprocess(st1, st2)))
+    toronto['Street-Name'] = location_result[:, 0]
+    toronto['Intersection-1'] = location_result[:, 1]
+    toronto['Intersection-2'] = location_result[:, 2]
+    toronto.rename(index=str, columns={
+        'District': 'Neighborhood',
+        'LONGITUDE': 'Longitude',
+        'LATITUDE': 'Latitude',
+    }, inplace=True)
+    toronto_location_dim = toronto.groupby(
+        ['Street-Name', 'Intersection-1', 'Intersection-2',
+            'Neighborhood', 'Latitude', 'Longitude']).size().reset_index()
+    toronto_location_dim.drop(
+        columns=toronto_location_dim.columns[-1], inplace=True)
+    toronto_location_dim['City'] = [
+        'Toronto' for i in range(
+            toronto_location_dim.shape[0])]
+
+    if os.path.isfile('./datasets/tmp/location_dimension.csv'):
+        location_dim = pd.read_csv('./datasets/tmp/location_dimension.csv')
+        location_dim.drop(columns=[location_dim.columns[0]], inplace=True)
+        location_dim = pd.concat(
+            [
+                toronto_location_dim[location_dim.columns],
+                location_dim
+            ], ignore_index=True)
+        location_dim.drop_duplicates(inplace=True)
+        location_dim.to_csv('./datasets/tmp/location_dimension.csv')
+    else:
+        raise FileNotFoundError('location_dimension is not ready')
+    location_index = pd.Index(location_dim[['Street-Name', 'Intersection-1']])
+    toronto['location_key'] = toronto['Street-Name'].combine(
+        toronto['Intersection-1'],
+        lambda s1, i1:
+            location_dim[
+                (location_dim['Street-Name'] == s1) &
+                (location_dim['Intersection-1'] == i1)].index[0])
+
+    # ====================================================
+    # hour_dimension
+    # ====================================================
+    toronto['Date'] = toronto.DATE.apply(
+        lambda date: datetime.strptime(
+            date[:10], '%Y-%m-%d'))
+
+    toronto['month'] = toronto.Date.apply(
+        lambda date: date.month)
+
+    toronto['day'] = toronto.Date.apply(
+        lambda date: date.day)
+    toronto['day_of_the_week'] = toronto.Date.apply(
+        lambda date: date.weekday())
+    toronto['weekend'] = toronto.day_of_the_week.apply(
+        lambda date: 1 if date in [5, 6] else 0)
+    toronto['holiday'] = toronto.Date.apply(
+        lambda date: 1 if date in Canadian_Holidays else 0)
+    toronto['holiday_name'] = toronto.Date.apply(
+        lambda date: Canadian_Holidays.get(date)
+        if Canadian_Holidays.get(date) else 'Unknown')
+    toronto.rename(
+        index=str,
+        columns={
+            'YEAR': 'year',
+            'Hour': 'hour'
+        },
+        inplace=True)
+    toronto['Date'] = toronto.Date.apply(
+        lambda date: str(date)[:10])
+    if os.path.isfile('./datasets/tmp/hour_dimension.csv'):
+        hour = pd.read_csv('./datasets/tmp/hour_dimension.csv')
+        toronto_hour = toronto.groupby(
+            ['year', 'month', 'day', 'hour',
+                'Date', 'day_of_the_week', 'weekend',
+                'holiday', 'holiday_name'], as_index=False)\
+            .size().reset_index()
+        toronto_hour.drop(columns=[toronto_hour.columns[-1]], inplace=True)
+        hour = pd.concat([hour, toronto_hour], ignore_index=True)
+        hour.drop_duplicates(inplace=True)
+        hour.to_csv('./datasets/tmp/hour_dimension.csv')
+        toronto['hour_key'] = toronto.Date.combine(
+            toronto.hour,
+            lambda date, hr:
+                hour[
+                    (hour['Date'] == date) &
+                    (hour['hour'] == hr)].index.values[0])
+    final_cols = [
+        'hour_key',
+        'location_key',
+        'Accident_key',
+        'weather_key',
+        'Is_Fatal',
+        'Is_Intersection']
+    ottawa = pd.read_csv(
+        './datasets/tmp/ottawa.csv',
+        low_memory=False)[final_cols]
+
+    mix_result = pd.concat(
+        [ottawa, toronto[ottawa.columns]], ignore_index=True)
+    mix_result.to_csv('./datasets/tmp/ottawa_star_schema.csv', index=False)
+    return mix_result
 
 
 def staging():
-    # obtain all of the holidays
-    Canadian_Holidays = holidays.Canada()
-
     ottawa, calgary, toronto = read_data()
 
     ottawa = ottawa_dimensions(ottawa)
-    calgary = calgary_dimension(calgary)
-    toronto , toronto_accident , extra_dimension= toronto_dimension(toronto)
 
-    return ottawa, calgary, toronto , toronto_accident ,extra_dimension
+    toronto = toronto_dimension(toronto)
+
+    return ottawa, toronto
+
 
 
 if __name__ == "__main__":
-    ottawa, calgary, toronto, toronto_accident , extra_dimension = staging()
-    # not_change = datetime.time(8,30)
-    # change = datetime.time(8,14)
+    toronto = staging()

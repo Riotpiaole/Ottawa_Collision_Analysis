@@ -3,7 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 from time import time
-from constant import ontario_station
+from constant import ontario_station, desire_cols, rename_cols
 from multiprocessing import Pool, cpu_count
 
 
@@ -27,7 +27,7 @@ def get_province_path(province, path=None, prefix=None):
 def read_weather(path, province='Ontario'):
     print("Preprocessing file (%s)" % (path))
     start = time()
-    data = pd.read_csv(get_province_path(province, path))
+    data = pd.read_csv(get_province_path(province, path), low_memory=False)
     result = data[np.logical_and(
         data['Year'].isin([2014, 2015, 2016, 2017]),
         data['X.U.FEFF..Station.Name.'].isin(ontario_station))]
@@ -41,42 +41,42 @@ def read_weather(path, province='Ontario'):
           (path, round((end - start), 2)))
 
 
+def combine_reduce(province):
+    new_path = re.compile(r'14-17\w+.csv').match
+    all_path = filter(
+        new_path,
+        os.listdir('./datasets/climates/{}'
+                   .format(province)))
+
+    df_lists = [
+        pd.read_csv(
+            os.path.join(
+                get_province_path('Ontario'),
+                item),
+            low_memory=False) for item in all_path]
+    df_lists = pd.concat(df_lists, ignore_index=True, sort=True)
+    df_lists.dropna(subset=['Temp...C.'], inplace=True)
+    df_lists.dropna(subset=['Hmdx'], inplace=True)
+    df_lists.dropna(subset=['Stn.Press..kPa.'], inplace=True)
+    df_lists.to_csv('./datasets/climates/ontario.csv', index=False)
+    return df_lists
+
+
 def shrink(province):
     '''shrink the csv with'''
     def func(x): return os.path.join(get_province_path(province), x)
     if province.lower() == 'ontario':
-        all_paths = ['ontario_2_1.csv', 'Ontario_2_2.csv', 'Ontario_4.csv']
-    else:
-        # TODO add calgary support
-        all_paths = []
+        all_paths = list(
+            filter(
+                regex.match,
+                os.listdir('./datasets/climates/Ontario')))
+
     with Pool(cpu_count()) as pool:
         pool.map(read_weather, all_paths)
         pool.close()
 
 
 def combine_ontario():
-    desire_cols = [
-        'X.Date.Time',
-        'Wind.Spd.Flag',
-        'Temp...C.',
-        'Wind.Chill',
-        'Wind.Dir..10s.deg.',
-        'Visibility..km.',
-        'Stn.Press..kPa.',
-        'X.Province.',
-        'Hmdx', 'X.U.FEFF..Station.Name.']
-
-    rename_cols = [
-        'DateTime',
-        'WindSpeed',
-        'Temp',
-        'WindChill',
-        'WindDir',
-        'Vis',
-        'Pressure',
-        'humidity',
-        'Province',
-        'Name']
 
     new_columns_dict = dict(zip(desire_cols, rename_cols))
 
@@ -84,6 +84,7 @@ def combine_ontario():
 
         print("ontario.csv found. loading ontario weather data")
         datasets = pd.read_csv('./datasets/climates/ontario.csv')[desire_cols]
+        datasets.fillna('Unknown', inplace=True)
 
         # rename the columns to new cols
         datasets = datasets.rename(index=str, columns=new_columns_dict)
@@ -110,12 +111,8 @@ def combine_ontario():
     data = pd.concat(df_list, sort=True, ignore_index=True)[[desire_cols]]
     data.to_csv(os.path.join(climate_dir, 'ontario.csv'), index=False)
     data = data.rename(index=str, columns=new_columns_dict)
+    data.fillna('Unknown', inplace=True)
     return data
 
-
-def get_alberta():
-    pass
-
-
 if __name__ == "__main__":
-    data = combine_ontario()
+    ottawa, toronto = combine_ontario()

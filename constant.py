@@ -114,3 +114,27 @@ ontario_station = [
     'TORONTO TORBARRIE',
     'TORONTO YORK MILLS',
     'TORONTO NORTH YORK']
+
+desire_cols = [
+    'X.Date.Time',
+    'Wind.Spd.Flag',
+    'Temp...C.',
+    'Wind.Chill',
+    'Wind.Dir..10s.deg.',
+    'Visibility..km.',
+    'Stn.Press..kPa.',
+    'Hmdx',
+    'X.U.FEFF..Station.Name.',
+    'X.Province.']
+
+rename_cols = [
+    'DateTime',
+    'WindSpeed',
+    'Temp',
+    'WindChill',
+    'WindDir',
+    'Vis',
+    'Pressure',
+    'humidity',
+    'Name',
+    'Province']
