@@ -21,12 +21,7 @@ rear_end['Y_norm'] = y_norm
 
 rear_end[['X_norm','Y_norm']].to_csv('./norm_x.csv',index=False)
 from sklearn.cluster import DBSCAN
-# db = DBSCAN(
-#     eps=.002,
-#     min_samples=30,
-#     n_jobs=4
-# ).fit(
-#     rear_end[['X_norm', 'Y_norm']])
+
 
 db = DBSCAN(
     eps = .0055,
@@ -81,17 +76,17 @@ print(score_scaled)
 print('==================')
 
 
-### Find the best parameters using Silhouette Coefficient
-###### Already using the best parameters ######
-###### Time consuming, please uncomment following block is you want to use ######
-###### ==================
-###### ==================
-###### the best silhouette_score is:
-###### 0.07149377325615387
-###### whose parameters [eps,min_samples] are:
-###### [0.005500000000000001, 10]
-###### ==================
-###### ==================
+# ## Find the best parameters using Silhouette Coefficient
+# ##### Already using the best parameters ######
+# ##### Time consuming, please uncomment following block is you want to use ######
+# ##### ==================
+# ##### ==================
+# ##### the best silhouette_score is:
+# ##### 0.07149377325615387
+# ##### whose parameters [eps,min_samples] are:
+# ##### [0.005500000000000001, 10]
+# ##### ==================
+# ##### ==================
 # p_eps = .001
 # scores_scaled = []
 # score_information = []
@@ -102,15 +97,15 @@ print('==================')
 #             min_samples = p_min_samples,
 #             n_jobs = -2 # Use all CPUs except 1
 #         ).fit(X).labels_
-#
+
 #         score = metrics.silhouette_score(X, labels)
 #         scores_scaled.append(score)
 #         score_information.append([p_eps,p_min_samples])
 #         p_eps += .0005
-#
+
 # max = max(scores_scaled)
 # index = scores_scaled.index(max)
-#
+
 # print('==================')
 # print('the best silhouette_score is:')
 # print(max)
@@ -119,14 +114,13 @@ print('==================')
 # print('==================')
 # print('==================')
 
-###### End of the block ######
-##############################
-##############################
+# ###### End of the block ######
+# ##############################
+# ##############################
 
 
 
-gg = df.groupby(
-    by=df.label)
+gg = df.groupby(by=df.label)
 
 
 
@@ -192,45 +186,42 @@ cols = ['Street-Name','Intersection-1','Intersection-2']
 
 # plt.show()
 
-def street_count():
-    count = 0
-    ggs = []
 
-    for i in [0, 19, 26, 5 ,15]:
-        [ ggs.append(j) for j in list(gg.groups[i].values) ]
-    ggs = list(set(ggs))
-    return ggs
+def count_street(streets,count):
+    for street in streets:
+        street = street.strip()
+        if street == 'Unknown':
+            continue
+        if street not in count.keys():
+            count[street] = 1
+            continue
+        count[street] +=1
+    return count
 
-#     # print(rear_end.iloc[ggs].groupby(['Street-Name']).size().sort_values(ascending=False))
+def cluster_results(collection):
+    assert collection in [0, 19, 26, 5 ,15]
+    count =  {}
+    groups = gg.groups[collection]
+    for street in rear_end.iloc[groups][cols].values:
 
-groups = street_count()
-count = {}
+        count = count_street(street,count)
+    print("======================================================================================")
+    result_1 = pd.DataFrame(
+        {
+            'street_name':list(count.keys()),
+            'count':list(count.values())
+        }).sort_values(['count'],ascending=False)
+    print(result_1)
+    print("======================================================================================")
+    result_2 = rear_end.iloc[groups].groupby(
+        cols[1:]).size().sort_values(ascending=False)
+    print(result_2)
+    print("======================================================================================")
+    result_3 = rear_end.iloc[groups].groupby(
+        cols).size().sort_values(ascending=False)
+    print(result_3)
+    print("======================================================================================")
+    return result_1 , result_2 , result_3
 
-def count_street(street):
-    if street == 'Unknown':
-        return
-    if street not in count.keys():
-        count[street] = 1
-        return
-    count[street] +=1
-
-
-for row in rear_end.iloc[groups][cols].values:
-    for streets in row:
-        count_street(streets)
-print("======================================================================================")
-result_1 = pd.DataFrame(
-    {
-        'street_name':list(count.keys()),
-        'count':list(count.values())
-    }).sort_values(['count'],ascending=False)
-print(result_1)
-print("======================================================================================")
-result_2 = rear_end.iloc[groups].groupby(
-    cols[1:]).size().sort_values(ascending=False)
-print(result_2)
-print("======================================================================================")
-result_3 = rear_end.iloc[groups].groupby(
-    cols).size().sort_values(ascending=False)
-print(result_3)
-print("======================================================================================")
+for i in [0, 19, 26, 5 ,15]:
+    cluster_results(i)
